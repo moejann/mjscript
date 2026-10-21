@@ -210,6 +210,9 @@ dialog{padding:1.1rem;border-radius:18px}
 dialog h2{font-size:1.2rem}
 footer{padding:1.4rem .5rem 0}
 }
+#dbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(4.2rem + env(safe-area-inset-bottom,0px));max-width:min(30rem,calc(100vw - 32px));background:var(--navy);color:#fff;padding:.6rem .9rem;border-radius:14px;font-size:.85rem;display:flex;gap:.6rem;align-items:center;z-index:49;box-shadow:0 6px 20px rgba(0,0,0,.3)}
+#dbar .pill{background:#fff;color:#26324f;border-color:#fff}
+#dbar .pill.alt{background:transparent;color:#fff;border-color:rgba(255,255,255,.5)}
 </style>
 
 <div class="page">
@@ -308,7 +311,11 @@ const safeUrl=u=>{try{const x=new URL(String(u||"").trim());return(x.protocol===
 const lines=v=>v.split("\n").map(x=>x.trim()).filter(Boolean);
 const csv=v=>v.split(",").map(x=>x.trim()).filter(Boolean);
 function norm(d){d=d||{};d.youtube=d.youtube||"";["scripts","executors","configs"].forEach(k=>{d[k]=(Array.isArray(d[k])?d[k]:[]).map((x,i)=>({id:x.id||k[0]+i,title:String(x.title||"Untitled"),date:x.date||"",desc:x.desc||"",img:x.img||"",link:x.link||"",video:x.video||"",label:x.label||"",hue:x.hue,tags:x.tags||[],steps:x.steps||[],notes:x.notes||[],config:x.config||"",upd:x.upd||0,newUntil:x.newUntil||0})).filter(x=>!/^Sample Script (Three|Four|Five|Six)$/.test(x.title))});return d}
-async function load(){try{const r=await fetch("data.json",{cache:"no-store"});if(r.ok)return norm(await r.json())}catch(e){}return norm(JSON.parse(JSON.stringify(DEFAULT)))}
+const ADMIN=new URLSearchParams(location.search).has("admin");let PUB="";
+async function load(){let p=null;try{const r=await fetch("data.json?v="+Date.now(),{cache:"no-store"});if(r.ok)p=norm(await r.json())}catch(e){}
+if(!p)p=norm(JSON.parse(JSON.stringify(DEFAULT)));PUB=JSON.stringify(p);
+if(ADMIN){try{const d=localStorage.getItem("mjdraft");if(d){if(d===PUB)localStorage.removeItem("mjdraft");else return norm(JSON.parse(d))}}catch(e){}}
+return p}
 function hueOf(s){if(s.hue!=null)return s.hue;let n=0;for(const c of s.id||s.title)n=(n*31+c.charCodeAt(0))%360;return n}
 function thumb(s,sq){
   if(s.img)return s.img;
@@ -328,15 +335,28 @@ function toast(msg,err){
 let chain=Promise.resolve();
 function persist(){chain=chain.then(doSave);return chain}
 async function doSave(){
-  let art=null;try{art=window.claude?.use?await window.claude.use("artifact"):null}catch(e){}
-  if(!art){toast("Saving isn't available in this view.",true);return}
-  try{await art.publish({"data.json":JSON.stringify(DATA)});toast("Saved.")}
-  catch(e){
-    const c=e&&e.code;
-    if(c==="conflict")toast("Someone else saved first. Loading the latest version…");
-    else if(["not_writer","not_granted","not_declared","capability_disabled","capability_removed","consent_required"].includes(c))toast("Saving isn't available for your account here.",true);
-    else toast("Couldn't save. Your change is still on this page; try again in a moment.",true);
-  }
+  if(!ADMIN){toast("Editing is only available in admin mode.",true);return}
+  try{localStorage.setItem("mjdraft",JSON.stringify(DATA));toast("Saved as draft. Press Publish when you're ready.")}
+  catch(e){toast("Couldn't save the draft (browser storage is blocked).",true)}
+  updBar();
+}
+function updBar(){
+  let b=document.getElementById("dbar");const dirty=ADMIN&&JSON.stringify(DATA)!==PUB;
+  if(!dirty){if(b)b.remove();return}
+  if(!b){b=h("div",{id:"dbar"});document.body.append(b)}
+  const pb=h("button",{class:"pill sm",type:"button",text:"Publish"}),db=h("button",{class:"pill sm alt",type:"button",text:"Discard"});
+  pb.onclick=publish;db.onclick=discard;b.replaceChildren(h("span",{text:"Unpublished changes"}),pb,db);
+}
+function publish(){
+  const blob=new Blob([JSON.stringify(DATA)],{type:"application/json"}),a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);a.download="data.json";document.body.append(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+  toast("data.json downloaded. Upload it to your GitHub repo (Add file, then Upload files) and commit.");
+}
+function discard(){
+  if(!confirm("Discard all unpublished changes?"))return;
+  try{localStorage.removeItem("mjdraft")}catch(e){}
+  DATA=norm(JSON.parse(PUB));renderAll();updBar();toast("Draft discarded.");
 }
 const PER=12,PAGE={scripts:1,executors:1,configs:1};
 function pageList(c,n){
@@ -533,7 +553,7 @@ tb.addEventListener("click",()=>{
 });})();
 window.addEventListener("hashchange",route);
 (async()=>{
-  DATA=await load();renderAll();route();
+  DATA=await load();if(ADMIN)CAN_EDIT=true;renderAll();route();updBar();
 })();
 </script>
 
